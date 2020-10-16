@@ -789,7 +789,15 @@ public class LearnerHandler extends ZooKeeperThread {
                     Iterator<Proposal> committedLogItr = db.getCommittedLog().iterator();
                     currentZxid = queueCommittedProposals(committedLogItr, currentZxid,
                                                          null, maxCommittedLog);
-                    needSnap = false;
+                    // Fall back to snapshot since we do not have all required transactions in our txnlog + committedlog
+                    if (currentZxid < lastProcessedZxid) {
+                    	LOG.debug("We need to fall back to snapshot. Not enough transactions in txn log and committedlog");
+                    	needSnap = true;
+                    } else if (currentZxid == lastProcessedZxid){
+                    	needSnap = false;
+                    } else {
+                    	LOG.error("Critical error: There are transactions in committedlog that are not applied to the data tree yet");
+                    }
                 }
                 // closing the resources
                 if (txnLogItr instanceof TxnLogProposalIterator) {

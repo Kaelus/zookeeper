@@ -1513,4 +1513,206 @@ public class QuorumPeerMainTest extends QuorumPeerTestBase {
             };
         }
     }
+    
+    @Test
+    public void testResyncWithLeaderHavingIncompleteCommitlog() throws Exception {				
+    	int numKeys = 3;			
+    	String[] keys = new String[numKeys];			
+    	int base;			
+    				
+    	byte[][] outputA = new byte[numKeys][];			
+    	byte[][] outputB = new byte[numKeys][];			
+    	byte[][] outputC = new byte[numKeys][];			
+    	String outputAKey1 = null;			
+    	String outputBKey1 = null;			
+    	String outputCKey1 = null;			
+    	String outputAKey2 = null;			
+    	String outputBKey2 = null;			
+    	String outputCKey2 = null;			
+    	String outputAKey3 = null;			
+    	String outputBKey3 = null;			
+    	String outputCKey3 = null;			
+
+    				
+    	int numServers = 3;			
+    	Servers svrs = LaunchServers(numServers);			
+    				
+    	String path = "/testDivergenceResync";			
+    	int srvA = -1;			
+    	int srvB = -1;			
+    	int srvC = -1;			
+    				
+    	for (int i = 0; i < numKeys; i++) {			
+    		keys[i] = path + i;		
+    	}			
+    				
+    	/** 0. Initialization */			
+    	// find the leader			
+    	for (int i = 0; i < numServers; i++) {			
+    		if (svrs.mt[i].main.quorumPeer.leader != null) {		
+    			srvC = i;	
+    		}		
+    	}			
+    				
+    	// make sure there is a leader			
+    	Assert.assertTrue("There should be a leader", srvC >= 0);			
+    				
+    	base = 0;			
+    				
+    	// create initial znodes			
+    	for (int j = 0; j < numKeys; j++) {			
+    		byte[] valToWrite = ((j + base) + "").getBytes();		
+    		svrs.zk[srvC].create(keys[j], valToWrite, Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);		
+    	}			
+    				
+    	base = 1000;			
+    				
+    	srvA = (srvC + 1) % numServers;			
+    	srvB = (srvC + 2) % numServers;			
+    				
+    	ZooKeeper[] resyncNodes;
+    	
+    	int leader = -1;			
+    	for (int i = 0; i < numServers; i++) {			
+    		if (svrs.mt[i].main.quorumPeer.leader != null) {		
+    			leader = i;	
+    		}		
+    	}			
+    	Assert.assertTrue("There should be a leader", leader >= 0);		
+    	Assert.assertTrue("There should be a leader", leader == srvC);
+    				
+    	// Divergence			
+    	svrs.mt[srvA].shutdown();			
+    	byte[] valToWrite = ((0 + base) + "").getBytes();			
+    	svrs.zk[leader].setData(keys[0], valToWrite, -1, null, null);			
+    	Thread.sleep(1000);			
+    	System.gc();			
+    	svrs.mt[srvC].shutdown();
+    	svrs.mt[srvB].shutdown();
+
+    	// Resync A and B			
+    	svrs.mt[srvA].start();			
+    	svrs.mt[srvB].start();			
+    	resyncNodes = new ZooKeeper[2];			
+    	resyncNodes[0] = svrs.zk[srvA];			
+    	resyncNodes[1] = svrs.zk[srvB];			
+    	waitForAll(resyncNodes, States.CONNECTED);			
+    	leader = -1;			
+    	for (int i = 0; i < numServers; i++) {
+    		if (svrs.mt[i].main.quorumPeer.leader != null) {		
+    			leader = i;	
+    		}		
+    	}			
+    	Assert.assertTrue("There should be a leader", leader >= 0);			
+    	Assert.assertTrue("There should be a leader", leader == srvB);			
+    				
+    	// Divergence			
+    	svrs.mt[srvA].shutdown();			
+    	valToWrite = ((1 + base) + "").getBytes();			
+    	svrs.zk[leader].setData(keys[1], valToWrite, -1, null, null);			
+    	Thread.sleep(1000);			
+    	System.gc();			
+    	svrs.mt[srvB].shutdown();
+    	waitForAll(svrs.zk, States.CONNECTING);			
+    				
+    	// Resync B and C			
+    	svrs.mt[srvB].start();			
+    	svrs.mt[srvC].start();			
+    	resyncNodes = new ZooKeeper[2];			
+    	resyncNodes[0] = svrs.zk[srvB];			
+    	resyncNodes[1] = svrs.zk[srvC];			
+    	waitForAll(resyncNodes, States.CONNECTED);			
+    	leader = -1;			
+    	for (int i = 0; i < numServers; i++) {			
+    		if (svrs.mt[i].main.quorumPeer.leader != null) {		
+    			leader = i;	
+    		}		
+    	}			
+    	Assert.assertTrue("There should be a leader", leader >= 0);			
+    	Assert.assertTrue("There should be a leader", leader == srvB);			
+    				
+    	// Divergence			
+    	svrs.mt[srvC].shutdown();			
+    	valToWrite = ((1 + base) + "").getBytes();			
+    	svrs.zk[leader].setData(keys[2], valToWrite, -1, null, null);			
+    	Thread.sleep(1000);			
+    	System.gc();			
+    	svrs.mt[srvB].shutdown();			
+    	waitForAll(svrs.zk, States.CONNECTING);			
+
+    	// Resync A and C			
+    	svrs.mt[srvA].start();			
+    	svrs.mt[srvC].start();			
+    	resyncNodes = new ZooKeeper[2];			
+    	resyncNodes[0] = svrs.zk[srvA];			
+    	resyncNodes[1] = svrs.zk[srvC];			
+    	waitForAll(resyncNodes, States.CONNECTED);			
+    	leader = -1;			
+    	for (int i = 0; i < numServers; i++) {			
+    		if (svrs.mt[i].main.quorumPeer.leader != null) {		
+    			leader = i;	
+    		}		
+    	}			
+    	Assert.assertTrue("There should be a leader", leader >= 0);			
+    	Assert.assertTrue("There should be a leader", leader == srvC);			
+    	
+    	// Restart B as well			
+    	svrs.mt[srvB].start();			
+    	resyncNodes = new ZooKeeper[1];			
+    	resyncNodes[0] = svrs.zk[srvB];			
+    	waitForAll(resyncNodes, States.CONNECTED);			
+    	leader = -1;			
+    	for (int i = 0; i < numServers; i++) {			
+    		if (svrs.mt[i].main.quorumPeer.leader != null) {		
+    			leader = i;	
+    		}		
+    	}			
+    	Assert.assertTrue("There should be a leader", leader >= 0);			
+    	Assert.assertTrue("There should be a leader", leader == srvC);			
+    				
+    	/** invariant check */			
+    	outputA[0] = svrs.zk[srvA].getData(path + 0, false, null);			
+    	outputA[1] = svrs.zk[srvA].getData(path + 1, false, null);			
+    	outputA[2] = svrs.zk[srvA].getData(path + 2, false, null);
+    	outputB[0] = svrs.zk[srvB].getData(path + 0, false, null);			
+    	outputB[1] = svrs.zk[srvB].getData(path + 1, false, null);
+    	outputB[2] = svrs.zk[srvB].getData(path + 2, false, null);
+    	outputC[0] = svrs.zk[srvC].getData(path + 0, false, null);			
+    	outputC[1] = svrs.zk[srvC].getData(path + 1, false, null);
+    	outputC[2] = svrs.zk[srvC].getData(path + 2, false, null);
+    				
+    	outputAKey1 = new String(outputA[0], "UTF-8");			
+    	outputBKey1 = new String(outputB[0], "UTF-8");			
+    	outputCKey1 = new String(outputC[0], "UTF-8");			
+    	outputAKey2 = new String(outputA[1], "UTF-8");			
+    	outputBKey2 = new String(outputB[1], "UTF-8");			
+    	outputCKey2 = new String(outputC[1], "UTF-8");
+    	outputAKey3 = new String(outputA[2], "UTF-8");			
+    	outputBKey3 = new String(outputB[2], "UTF-8");			
+    	outputCKey3 = new String(outputC[2], "UTF-8");			
+    				
+    	LOG.info("outputAKey1=" + outputAKey1);			
+    	LOG.info("outputBKey1=" + outputBKey1);			
+    	LOG.info("outputCKey1=" + outputCKey1);			
+    	LOG.info("outputAKey2=" + outputAKey2);			
+    	LOG.info("outputBKey2=" + outputBKey2);			
+    	LOG.info("outputCKey2=" + outputCKey2);
+    	LOG.info("outputAKey3=" + outputAKey3);			
+    	LOG.info("outputBKey3=" + outputBKey3);			
+    	LOG.info("outputCKey3=" + outputCKey3);			
+    				
+    	Assert.assertEquals("Expecting the value of the 1st key on 1st and 2nd servers should be same",			
+    			outputAKey1, outputBKey1);	
+    	Assert.assertEquals("Expecting the value of the 1st key on 2nd and 3rd servers should be same",			
+    			outputBKey1, outputCKey1);	
+    	Assert.assertEquals("Expecting the value of the 2nd key on 1st and 2nd servers should be same",			
+    			outputAKey2, outputBKey2);	
+    	Assert.assertEquals("Expecting the value of the 2nd key on 2nd and 3rd servers should be same",			
+    			outputBKey2, outputCKey2);
+    	Assert.assertEquals("Expecting the value of the 2nd key on 1st and 2nd servers should be same",			
+    			outputAKey3, outputBKey3);	
+    	Assert.assertEquals("Expecting the value of the 2nd key on 2nd and 3rd servers should be same",			
+    			outputBKey3, outputCKey3);	
+
+    }
 }
